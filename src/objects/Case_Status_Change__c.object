@@ -155,7 +155,6 @@
         <columns>Status_Name__c</columns>
         <columns>Status_Time__c</columns>
         <columns>Age__c</columns>
-      <!--  <columns>OWNER.ALIAS</columns> -->
         <filterScope>Everything</filterScope>
         <label>All</label>
     </listViews>

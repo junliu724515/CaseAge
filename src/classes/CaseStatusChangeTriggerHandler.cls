@@ -3,11 +3,7 @@ public with sharing class CaseStatusChangeTriggerHandler {
     public static void OnAfterInsert(Case[] newObjects){
         
         List<Case_Status_Change__c> statusChanges = new List<Case_Status_Change__c>();
-        
-        for (Case newCase: newObjects) {
- 
-            statusChanges.add(createCaseStatus(newCase, null));
-        }
+        statusChanges.addAll(createCaseStatus(newObjects, null));
         insert statusChanges;
     }
     
@@ -16,19 +12,17 @@ public with sharing class CaseStatusChangeTriggerHandler {
         List<Case_Status_Change__c> statusChanges = new List<Case_Status_Change__c>();
         List<String> oldStatuses = new List<String>();
         List<Id> caseIds = new List<Id>();
+
+        statusChanges.addAll(createCaseStatus(updatedObjects, oldObjectMap));
         
-        for (Case updatedObject: updatedObjects) {
+        //construct old status List and Ids to retrieve old case status changes to update the business hours
+        for (Case_Status_Change__c statusChange: statusChanges) {
             
-            Case oldObject = oldObjectMap.get(updatedObject.Id);    
-            if (updatedObject.Status != oldObject.Status) { 
-                
-                statusChanges.add(createCaseStatus(updatedObject, oldObject));                
-                oldStatuses.add(oldObject.Status);
-                caseIds.add(updatedObject.Id);
-            }
+            oldStatuses.add(statusChange.Status_From__c);
+            caseIds.add(statusChange.Case__c);            
         }
         
-        if (caseIds.size()>0) {
+        if (caseIds.size()>0 && oldStatuses.size()>0) {
            
            List<Case_Status_Change__c> oldStatusChanges = [select Name, Set_Time__c from Case_Status_Change__c where Status_Name__c IN :oldStatuses and Case__c IN :caseIds and Change_Time__c=null];
            BusinessHours bh = [SELECT Id FROM BusinessHours WHERE IsDefault=true];
@@ -49,27 +43,45 @@ public with sharing class CaseStatusChangeTriggerHandler {
     }
     
     
-    private static Case_Status_Change__c createCaseStatus(Case caseObject, Case oldObject){
+    private static List<Case_Status_Change__c> createCaseStatus(Case[] caseObjects, Map<Id, Case> oldObjectMap){
         
-        List<Case> cases = [select CaseNumber, Owner.Name from Case where Id=:caseObject.Id];
-        Case_Status_Change__c  statusChange = new  Case_Status_Change__c();
-        String name = '';
-        statusChange.Case__c = caseObject.Id;
-        statusChange.Status_Name__c = caseObject.Status;
-        if (cases.size()>0) {
-           statusChange.Current_Case_Owner__c = cases.get(0).Owner.Name;
-           name = cases.get(0).CaseNumber;
+        List<Case_Status_Change__c> statusChanges = new List<Case_Status_Change__c>();
+  
+        for (Case caseObject: caseObjects) {
+         
+            List<Case> cases = [select CaseNumber, Owner.Name from Case where Id=:caseObject.Id];
+            Case_Status_Change__c  statusChange = null;
+            
+            if (cases.size()>0) {
+                //this is the update case, check if the status has changed or not, if changed
+                //a new case status change record is created 
+                if (oldObjectMap!=null){
+                    Case oldObject = oldObjectMap.get(caseObject.Id);
+                    if (caseObject.Status != oldObject.Status) { 
+                      
+                       statusChange = new Case_Status_Change__c();
+                       statusChange.Status_From__c  = oldObject.Status;
+                       statusChange.Name = cases.get(0).CaseNumber+' from '+oldObject.Status +' to '+caseObject.Status;
+                    }
+               }
+               // this is the new case, the first case status change record is created
+               else{
+                    statusChange = new Case_Status_Change__c();
+                    statusChange.Name = cases.get(0).CaseNumber+' status: '+caseObject.Status;                 
+               }
+               
+               //populate the rest of fields, add it to the result list to return 
+               if (statusChange!=null) {
+                   
+                    statusChange.Case__c = caseObject.Id;
+                    statusChange.Status_Name__c = caseObject.Status;
+                    statusChange.Current_Case_Owner__c = cases.get(0).Owner.Name;
+                    statusChange.Set_Time__c = Datetime.now();
+                    statusChanges.add(statusChange);
+               }   
+            }
         }
-        statusChange.Set_Time__c = Datetime.now();
-        if (oldObject != null) {
-          statusChange.Status_From__c  = oldObject.Status;
-          statusChange.Name = name+' from '+oldObject.Status +' to '+caseObject.Status;
-        }
-        else {
-          statusChange.Name = name+' status: '+caseObject.Status; 
-        }
-        
-        return statusChange;
+        return statusChanges;
     }
     
     private static String getAge(Double milliseconds) {
